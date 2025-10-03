@@ -79,9 +79,7 @@ def world_to_screen(world_pos):
 class Planet:
     def __init__(self, x, y, vx, vy, mass, color=None, radius=None, stage="PLANET"):
         self.pos, self.vel, self.mass = np.array([float(x), float(y)]), np.array([float(vx), float(vy)]), float(mass)
-        self.stage = stage
-        self.color = color
-        self.trail = []
+        self.stage, self.color, self.trail = stage, color, []
         self.radius = int(radius if radius is not None else (self.mass/1)**(1/3.0))
         self.supernova_timer = 0
         if self.color is None:
@@ -89,7 +87,8 @@ class Planet:
 
     def set_stage_color(self):
         if self.stage == "PLANET":
-            self.color = (random.randint(50, 255), random.randint(50, 255), random.randint(50, 255))
+            if self.color is None: # Only assign random color if no color exists
+                self.color = (random.randint(50, 255), random.randint(50, 255), random.randint(50, 255))
         elif self.stage == "RED_DWARF": self.color = (255, 100, 50)
         elif self.stage == "STAR": self.color = (255, 255, 200)
         elif self.stage == "RED_GIANT": self.color = (255, 69, 0)
