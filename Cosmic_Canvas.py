@@ -22,6 +22,7 @@ PHYSICS_SUB_STEPS = 5
 # --- Star stage mass thresholds ---
 RED_DWARF_MASS = 50000
 STAR_MASS = 200000
+RED_GIANT_MASS = 500000
 BLUE_GIANT_MASS = 800000
 CHANDRASEKHAR_LIMIT = 1400000
 BLACK_HOLE_MASS = 2000000
@@ -76,39 +77,39 @@ def world_to_screen(world_pos):
 
 # Planet class
 class Planet:
-    def __init__(self, x, y, vx, vy, mass, color, radius=None, stage="PLANET"):
+    def __init__(self, x, y, vx, vy, mass, color=None, radius=None, stage="PLANET"):
         self.pos, self.vel, self.mass = np.array([float(x), float(y)]), np.array([float(vx), float(vy)]), float(mass)
-        self.stage, self.color, self.trail = stage, color, []
+        self.stage = stage
+        self.color = color
+        self.trail = []
         self.radius = int(radius if radius is not None else (self.mass/1)**(1/3.0))
         self.supernova_timer = 0
-        self.set_stage(self.stage)
+        if self.color is None:
+            self.set_stage_color()
 
-    def set_stage(self, new_stage):
-        self.stage = new_stage
-        if self.stage == "PLANET": pass
+    def set_stage_color(self):
+        if self.stage == "PLANET":
+            self.color = (random.randint(50, 255), random.randint(50, 255), random.randint(50, 255))
         elif self.stage == "RED_DWARF": self.color = (255, 100, 50)
         elif self.stage == "STAR": self.color = (255, 255, 200)
+        elif self.stage == "RED_GIANT": self.color = (255, 69, 0)
         elif self.stage == "BLUE_GIANT": self.color = (170, 220, 255)
         elif self.stage == "WHITE_DWARF": self.color = (240, 240, 255)
         elif self.stage == "NEUTRON_STAR": self.color = (200, 220, 255)
         elif self.stage == "BLACK_HOLE": self.color = (0, 0, 0)
 
+    def set_stage(self, new_stage):
+        self.stage = new_stage
+        self.set_stage_color()
+
     def trigger_evolution_check(self):
-        # Check for highest tier evolutions first
-        if self.stage == "BLUE_GIANT" and self.mass >= BLACK_HOLE_MASS:
-            self.go_supernova()
-        elif self.stage == "WHITE_DWARF" and self.mass >= CHANDRASEKHAR_LIMIT:
-            self.go_supernova()
-        elif self.stage == "NEUTRON_STAR" and self.mass >= BLACK_HOLE_MASS:
-            self.set_stage("BLACK_HOLE") # Direct collapse, no supernova
-        
-        # Then check for promotions if no major event was triggered
-        elif self.stage == "PLANET" and self.mass >= RED_DWARF_MASS:
-            self.set_stage("RED_DWARF")
-        elif self.stage == "RED_DWARF" and self.mass >= STAR_MASS:
-            self.set_stage("STAR")
-        elif self.stage == "STAR" and self.mass >= BLUE_GIANT_MASS:
-            self.set_stage("BLUE_GIANT")
+        if self.stage == "BLUE_GIANT" and self.mass >= BLACK_HOLE_MASS: self.go_supernova()
+        elif self.stage == "WHITE_DWARF" and self.mass >= CHANDRASEKHAR_LIMIT: self.go_supernova()
+        elif self.stage == "NEUTRON_STAR" and self.mass >= BLACK_HOLE_MASS: self.set_stage("BLACK_HOLE")
+        elif self.stage == "PLANET" and self.mass >= RED_DWARF_MASS: self.set_stage("RED_DWARF")
+        elif self.stage == "RED_DWARF" and self.mass >= STAR_MASS: self.set_stage("STAR")
+        elif self.stage == "STAR" and self.mass >= RED_GIANT_MASS: self.set_stage("RED_GIANT")
+        elif self.stage == "RED_GIANT" and self.mass >= BLUE_GIANT_MASS: self.set_stage("BLUE_GIANT")
         
     def go_supernova(self):
         self.supernova_timer = 120
@@ -125,17 +126,11 @@ class Planet:
         total_force = np.array([0.0, 0.0])
         for other in planets:
             if other != self:
-                r_vec = other.pos - self.pos
-                r_mag = np.linalg.norm(r_vec)
-                
+                r_vec, r_mag = other.pos - self.pos, np.linalg.norm(other.pos - self.pos)
                 if self.stage == "BLACK_HOLE" and r_mag < self.radius:
                     self.mass += other.mass; self.radius = int((self.mass / 1)**(1/3.0))
                     if other in planets: planets.remove(other); continue
-
-                if r_mag > 0:
-                    force_mag = G * self.mass * other.mass / r_mag**2
-                    total_force += force_mag * r_vec / r_mag
-
+                if r_mag > 0: total_force += (G * self.mass * other.mass / r_mag**3) * r_vec
                 if r_mag > 0 and r_mag < self.radius + other.radius:
                     if self.mass >= other.mass and other in planets:
                         new_mass = self.mass + other.mass
@@ -156,31 +151,30 @@ class Planet:
         screen_radius = max(2, int(self.radius * camera_zoom))
 
         if self.supernova_timer > 0:
-            self.supernova_timer -= 1
-            progress = (120 - self.supernova_timer) / 120
+            self.supernova_timer -= 1; progress = (120 - self.supernova_timer)/120
             size = int(progress * 500 * camera_zoom); alpha = int((1 - progress**2) * 200)
-            if size > 0 and alpha > 0:
+            if size>0 and alpha>0:
                 glow_surface = pygame.Surface((size*2, size*2), pygame.SRCALPHA)
                 pygame.draw.circle(glow_surface, (255,255,255,alpha), (size,size), size)
                 screen.blit(glow_surface, (screen_pos[0]-size, screen_pos[1]-size))
         
-        if self.stage in ["RED_DWARF", "STAR", "BLUE_GIANT", "WHITE_DWARF"]:
-            glow_map = {"RED_DWARF": 1.5, "STAR": 2.5, "BLUE_GIANT": 3.0, "WHITE_DWARF": 2.0}
-            color_map = {"RED_DWARF": (255, 100, 50, 80), "STAR": (255, 255, 200, 50), "BLUE_GIANT": (170, 220, 255, 70), "WHITE_DWARF": (240, 240, 255, 40)}
-            glow_radius = int(screen_radius * glow_map[self.stage])
+        if self.stage in ["RED_DWARF", "STAR", "RED_GIANT", "BLUE_GIANT", "WHITE_DWARF"]:
+            glow_map = {"RED_DWARF":1.5, "STAR":2.5, "RED_GIANT":3.5, "BLUE_GIANT":3.0, "WHITE_DWARF":2.0}
+            color_map = {"RED_DWARF":(255,100,50,80), "STAR":(255,255,200,50), "RED_GIANT":(255,69,0,70), "BLUE_GIANT":(170,220,255,70), "WHITE_DWARF":(240,240,255,40)}
+            if self.stage == "RED_GIANT": screen_radius = int(screen_radius * 2.0)
+            if self.stage == "BLUE_GIANT": screen_radius = int(screen_radius * 1.5)
+            glow_radius = int(screen_radius * glow_map.get(self.stage, 1.0))
             glow_surface = pygame.Surface((glow_radius*2, glow_radius*2), pygame.SRCALPHA)
             pygame.draw.circle(glow_surface, color_map[self.stage], (glow_radius, glow_radius), glow_radius)
             screen.blit(glow_surface, (screen_pos[0]-glow_radius, screen_pos[1]-glow_radius))
-        elif self.stage == "BLACK_HOLE":
-            pygame.draw.circle(screen, (255, 165, 0), screen_pos, screen_radius + 5, 3)
+        elif self.stage == "BLACK_HOLE": pygame.draw.circle(screen, (255,165,0), screen_pos, screen_radius + 5, 3)
         elif self.stage == "NEUTRON_STAR":
             pulse = abs(math.sin(pygame.time.get_ticks() * 0.01)) * 4
-            pygame.draw.circle(screen, (200, 220, 255, 150), screen_pos, screen_radius + int(pulse), 1)
+            pygame.draw.circle(screen, (200,220,255,150), screen_pos, screen_radius + int(pulse), 1)
 
-        if len(self.trail) > 1:
-            trail_color = (138, 43, 226) if self.stage == "BLACK_HOLE" else self.color
-            screen_trail = [tuple(world_to_screen(p)) for p in self.trail]
-            pygame.draw.lines(screen, trail_color, False, screen_trail, 1)
+        if len(self.trail)>1:
+            trail_color = (138,43,226) if self.stage == "BLACK_HOLE" else self.color
+            pygame.draw.lines(screen, trail_color, False, [tuple(world_to_screen(p)) for p in self.trail], 1)
         
         pygame.draw.circle(screen, self.color, screen_pos, screen_radius)
         if selected: pygame.draw.circle(screen, (255,255,255), screen_pos, screen_radius + 4, 2)
@@ -198,38 +192,38 @@ current_scenario, spawn_menu_buttons, spawn_menu_panel_rect, spawn_pos_world = "
 def load_scenario(name):
     global planets, selected_planet, camera_zoom, camera_offset, dragging_planet, current_scenario
     planets.clear(); selected_planet, dragging_planet = None, None
-    camera_zoom, camera_offset = 1.0, np.array([WIDTH / 2.0, HEIGHT / 2.0])
-    center_pos = [WIDTH / 2.0, HEIGHT / 2.0]; current_scenario = name
+    camera_zoom, camera_offset = 1.0, np.array([WIDTH/2.0, HEIGHT/2.0])
+    center_pos = [WIDTH/2.0, HEIGHT/2.0]; current_scenario = name
     if name == "Playground": return
     if name == "Dying Star":
-        camera_zoom=1.2; giant = Planet(center_pos[0]-100, center_pos[1], 0, 0.5, BLUE_GIANT_MASS, stage="BLUE_GIANT", color=(255,140,0))
-        wd = Planet(center_pos[0]+250, center_pos[1], 0, -1.5, CHANDRASEKHAR_LIMIT*0.9, stage="WHITE_DWARF", radius=15, color=(240,240,255)); planets.extend([giant, wd])
+        camera_zoom=1.2; giant = Planet(center_pos[0]-100, center_pos[1], 0, 0.5, RED_GIANT_MASS, stage="RED_GIANT")
+        wd = Planet(center_pos[0]+250, center_pos[1], 0, -1.5, CHANDRASEKHAR_LIMIT*0.9, stage="WHITE_DWARF", radius=15); planets.extend([giant, wd])
     elif name == "Solar System":
-        camera_zoom = 0.8; sun = Planet(center_pos[0], center_pos[1], 0, 0, 500000, stage="STAR", color=(255, 255, 200)); planets.append(sun)
-        p_data = [(80,5,(169,169,169)), (120,10,(218,165,32)), (160,12,(0,191,255)), (200,8,(255,69,0)), (300,500,(210,180,140)), (400,300,(240,230,140)),(500,100,(173,216,230)),(580,90,(0,0,205))]
+        camera_zoom = 0.4; sun = Planet(center_pos[0], center_pos[1], 0, 0, 450000, stage="STAR"); planets.append(sun)
+        p_data = [(160,5,(169,169,169)), (220,10,(218,165,32)), (290,12,(0,191,255)), (380,8,(255,69,0)), (600,500,(210,180,140)), (800,300,(240,230,140)),(1000,100,(173,216,230)),(1150,90,(0,0,205))]
         for i, (dist, mass, color) in enumerate(p_data):
-            angle = random.uniform(0, 2*np.pi); vel = circular_velocity(sun.mass, dist)
-            px,py,vx,vy = center_pos[0]+dist*np.cos(angle), center_pos[1]+dist*np.sin(angle),-vel*np.sin(angle),vel*np.cos(angle)
+            angle=random.uniform(0,2*np.pi); vel=circular_velocity(sun.mass, dist)
+            px,py,vx,vy = center_pos[0]+dist*np.cos(angle),center_pos[1]+dist*np.sin(angle),-vel*np.sin(angle),vel*np.cos(angle)
             planets.append(Planet(px,py,vx,vy,mass,color))
     elif name == "Binary Star System":
-        camera_zoom = 0.5; m1,m2 = 300000, 200000; total_mass,dist = m1+m2, 400
+        camera_zoom=0.5; m1,m2 = 300000,200000; total_mass,dist = m1+m2,400
         r1,r2 = dist*m2/total_mass, dist*m1/total_mass; vel_base = np.sqrt(G/(dist*total_mass)); v1,v2=m2*vel_base, m1*vel_base
-        planets.extend([Planet(center_pos[0]-r1, center_pos[1], 0, v1, m1, (255,255,200), stage="STAR"), Planet(center_pos[0]+r2, center_pos[1], 0, -v2, m2, (255,165,100), stage="STAR")])
+        planets.extend([Planet(center_pos[0]-r1, center_pos[1], 0, v1, m1, stage="STAR"), Planet(center_pos[0]+r2, center_pos[1], 0, -v2, m2, stage="STAR")])
         p_data = [(700,500,(173,216,230)), (850,800,(144,238,144)), (1000,600,(218,112,214))]
         for i, (dist_p, mass_p, color_p) in enumerate(p_data):
-            angle = (2*np.pi/len(p_data))*i; vel = circular_velocity(total_mass, dist_p)
+            angle=(2*np.pi/len(p_data))*i; vel=circular_velocity(total_mass, dist_p)
             px,py,vx,vy = center_pos[0]+dist_p*np.cos(angle), center_pos[1]+dist_p*np.sin(angle),-vel*np.sin(angle),vel*np.cos(angle)
             planets.append(Planet(px,py,vx,vy,mass_p,color_p))
     elif name == "Black Hole Center":
-        camera_zoom=0.6; bh = Planet(center_pos[0],center_pos[1],0,0,2000000,(0,0,0),stage="BLACK_HOLE"); planets.append(bh)
+        camera_zoom=0.6; bh=Planet(center_pos[0],center_pos[1],0,0,2000000,stage="BLACK_HOLE"); planets.append(bh)
         p_data = [(200,300,(255,69,0)),(350,500,(221,160,221)),(500,400,(100,149,237)),(600,100,(240,230,140)),(750,800,(32,178,170))]
         for i, (dist, mass, color) in enumerate(p_data):
-            angle = (2*np.pi/len(p_data))*i; vel = circular_velocity(bh.mass, dist)
+            angle=(2*np.pi/len(p_data))*i; vel=circular_velocity(bh.mass, dist)
             px,py,vx,vy = center_pos[0]+dist*np.cos(angle),center_pos[1]+dist*np.sin(angle),-vel*np.sin(angle),vel*np.cos(angle)
             planets.append(Planet(px,py,vx,vy,mass,color))
     elif name == "Binary Black Holes":
-        camera_zoom=1.0; mass,distance = 2000000, 400; orbital_v = np.sqrt((G*mass)/(2*distance))
-        planets.extend([Planet(center_pos[0]-distance/2, center_pos[1], 0, orbital_v, mass, (0,0,0), stage="BLACK_HOLE"), Planet(center_pos[0]+distance/2, center_pos[1], 0, -orbital_v, mass, (0,0,0), stage="BLACK_HOLE")])
+        camera_zoom=1.0; mass,distance = 2000000,400; orbital_v = np.sqrt((G*mass)/(2*distance))
+        planets.extend([Planet(center_pos[0]-distance/2,center_pos[1],0,orbital_v,mass,stage="BLACK_HOLE"), Planet(center_pos[0]+distance/2,center_pos[1],0,-orbital_v,mass,stage="BLACK_HOLE")])
 load_scenario("Solar System")
 
 pause_button = Button(WIDTH-110, 10, 100, 30, "Pause", button_font, (100,100,100), (150,150,150))
@@ -287,7 +281,7 @@ while running:
         elif spawn_menu_active:
             clicked_button_text = next((btn.text for btn in spawn_menu_buttons if btn.is_clicked(event)), None)
             if clicked_button_text:
-                types = {"Planet": (random.uniform(200,800), (random.randint(50,255),random.randint(50,255),random.randint(50,255)), "PLANET"), "Red Dwarf": (RED_DWARF_MASS, None, "RED_DWARF"), "Star": (STAR_MASS, None, "STAR"), "Blue Giant": (BLUE_GIANT_MASS, None, "BLUE_GIANT"), "White Dwarf": (CHANDRASEKHAR_LIMIT*0.8, None, "WHITE_DWARF"), "Neutron Star": (BLACK_HOLE_MASS*0.9, None, "NEUTRON_STAR"), "Black Hole": (BLACK_HOLE_MASS, None, "BLACK_HOLE")}
+                types = {"Planet":(random.uniform(200,800),None,"PLANET"), "Red Dwarf":(RED_DWARF_MASS,None,"RED_DWARF"), "Star":(STAR_MASS,None,"STAR"), "Red Giant":(RED_GIANT_MASS,None,"RED_GIANT"), "Blue Giant":(BLUE_GIANT_MASS,None,"BLUE_GIANT"), "White Dwarf":(CHANDRASEKHAR_LIMIT*0.8,None,"WHITE_DWARF"), "Neutron Star":(BLACK_HOLE_MASS*0.9,None,"NEUTRON_STAR"), "Black Hole":(BLACK_HOLE_MASS,None,"BLACK_HOLE")}
                 mass, color, stage = types.get(clicked_button_text); radius = 15 if stage=="WHITE_DWARF" else (10 if stage=="NEUTRON_STAR" else None)
                 planets.append(Planet(spawn_pos_world[0],spawn_pos_world[1],0,0,mass,color,stage=stage,radius=radius))
                 spawn_menu_active = False
@@ -306,8 +300,8 @@ while running:
                                 selected_planet, dragging_planet = p, p; drag_positions.clear(); drag_positions.append(mouse_pos); break
             elif event.button==3:
                 spawn_menu_active, menu_open, spawn_pos_world = True, False, screen_to_world(event.pos)
-                mx, my = event.pos; spawn_menu_panel_rect = pygame.Rect(mx,my, 160, 255)
-                spawn_menu_buttons = [Button(mx+5, my+5+35*i, 150, 30, name, button_font, (50,50,50),(80,80,80)) for i, name in enumerate(["Planet", "Red Dwarf", "Star", "Blue Giant", "White Dwarf", "Neutron Star", "Black Hole"])]
+                mx, my = event.pos; spawn_menu_panel_rect = pygame.Rect(mx,my, 160, 290)
+                spawn_menu_buttons = [Button(mx+5, my+5+35*i, 150, 30, name, button_font, (50,50,50),(80,80,80)) for i, name in enumerate(["Planet", "Red Dwarf", "Star", "Red Giant", "Blue Giant", "White Dwarf", "Neutron Star", "Black Hole"])]
         elif event.type == pygame.MOUSEBUTTONUP:
             if event.button==1 and dragging_planet:
                 if len(drag_positions)>1: dragging_planet.vel = (screen_to_world(drag_positions[-1])-screen_to_world(drag_positions[0]))*THROW_MULTIPLIER*5
@@ -316,13 +310,11 @@ while running:
         elif event.type == pygame.KEYDOWN and not active_box_handled_key:
             if event.key == pygame.K_SPACE: is_paused = not is_paused; pause_button.text = "Play" if is_paused else "Pause"
             if selected_planet:
-                if event.key == pygame.K_DELETE:
-                    planets.remove(selected_planet)
-                    selected_planet = None
+                if event.key == pygame.K_DELETE: planets.remove(selected_planet); selected_planet = None
                 elif event.key == pygame.K_UP:
-                    selected_planet.mass *= 1.1; selected_planet.radius = int((selected_planet.mass/1)**(1/3.0)); selected_planet.trigger_evolution_check(); last_selected_planet_for_boxes = None
+                    selected_planet.mass*=1.1; selected_planet.radius=int((selected_planet.mass/1)**(1/3.0)); selected_planet.trigger_evolution_check(); last_selected_planet_for_boxes=None
                 elif event.key == pygame.K_DOWN:
-                    selected_planet.mass *= 0.9; selected_planet.radius = max(2, int((selected_planet.mass/1)**(1/3.0))); selected_planet.trigger_evolution_check(); last_selected_planet_for_boxes = None
+                    selected_planet.mass*=0.9; selected_planet.radius=max(2,int((selected_planet.mass/1)**(1/3.0))); last_selected_planet_for_boxes=None
 
     if is_panning: camera_offset += (pan_start_pos-np.array(mouse_pos))/camera_zoom; pan_start_pos=np.array(mouse_pos)
     if dragging_planet: dragging_planet.pos=screen_to_world(mouse_pos); drag_positions.append(mouse_pos)
