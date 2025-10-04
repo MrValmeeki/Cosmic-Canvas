@@ -10,7 +10,7 @@ pygame.init()
 # Screen
 WIDTH, HEIGHT = 1000, 800
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Interactive Chaotic Planets")
+pygame.display.set_caption("Cosmic Canvas")
 clock = pygame.time.Clock()
 
 # Constants
